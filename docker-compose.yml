@@ -1,0 +1,88 @@
+# Docker Compose for MCP SuperAssistant Development
+
+services:
+  # Development environment with hot reload
+  dev:
+    build:
+      context: .
+      target: development
+    volumes:
+      # Mount source code for hot reload
+      - .:/app
+      - /app/node_modules
+      - /app/chrome-extension/node_modules
+    ports:
+      - "3000:3000"
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - CLI_CEB_DEV=true
+    command: pnpm dev
+    stdin_open: true
+    tty: true
+
+  # Build environment for production builds
+  build:
+    build:
+      context: .
+      target: builder
+    volumes:
+      - ./dist:/app/dist
+      - ./chrome-extension/dist:/app/chrome-extension/dist
+    environment:
+      - NODE_ENV=production
+    command: pnpm build
+
+  # Build for Firefox
+  build-firefox:
+    build:
+      context: .
+      target: development
+    volumes:
+      - ./dist:/app/dist
+      - ./chrome-extension/dist:/app/chrome-extension/dist
+    environment:
+      - NODE_ENV=production
+      - CLI_CEB_FIREFOX=true
+    command: pnpm build:firefox
+
+  # Code quality checks
+  lint:
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: pnpm lint
+
+  # Type checking
+  type-check:
+    build:
+      context: .
+      target: development  
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: pnpm type-check
+
+  # Testing environment
+  test:
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=test
+    command: pnpm e2e
+
+  # Production build with zip creation
+  package:
+    build:
+      context: .
+      target: production
+    volumes:
+      - ./dist:/app/output
+    command: sh -c "./create-zip.sh && cp *.tar.gz /app/output/"
