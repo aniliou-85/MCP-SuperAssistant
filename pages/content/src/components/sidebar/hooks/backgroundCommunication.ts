@@ -11,7 +11,7 @@ import Ajv from 'ajv';
  */
 export const useBackgroundCommunication = (): BackgroundCommunication => {
   // Default config as a constant
-  const DEFAULT_CONFIG: ServerConfig = { uri: 'http://localhost:3006/sse' };
+  const DEFAULT_CONFIG: ServerConfig = { uri: 'http://localhost:9121/sse' };
 
   // Connection management constants
   const MAX_RECONNECT_ATTEMPTS = 5;

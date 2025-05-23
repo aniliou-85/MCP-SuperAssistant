@@ -148,12 +148,12 @@ const ServerStatus: React.FC<ServerStatusProps> = ({ status: initialStatus }) =>
           logMessage('[ServerStatus] Initial server configuration loaded successfully');
         } else {
           // Handle empty URI case - set a default or placeholder
-          setServerUri('http://localhost:3006/sse');
+          setServerUri('http://localhost:9121/sse');
           logMessage('[ServerStatus] Using default server URI as config returned empty value');
         }
       } catch (error) {
         // Set default URI on error
-        setServerUri('http://localhost:3006/sse');
+        setServerUri('http://localhost:9121/sse');
         logMessage(
           `[ServerStatus] Error fetching server config: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -165,7 +165,7 @@ const ServerStatus: React.FC<ServerStatusProps> = ({ status: initialStatus }) =>
     if (!isInitializedRef.current) {
       fetchServerConfig().catch(() => {
         // Set default URI as last resort
-        setServerUri('http://localhost:3006/sse');
+        setServerUri('http://localhost:9121/sse');
         logMessage('[ServerStatus] Setting default URI after fetch failure');
         isInitializedRef.current = true;
       });
