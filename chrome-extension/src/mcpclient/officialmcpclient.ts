@@ -119,7 +119,7 @@ class PersistentMcpClient {
 
       // Create transport and client with FastMCP-compatible CORS options
       spinner.success(`Creating MCP client and connecting to server...`);
-      
+
       // Configure SSE transport options for FastMCP CORS compatibility
       const transportOptions: SSEClientTransportOptions = {
         // Headers required for proper SSE handling and CORS
@@ -160,7 +160,7 @@ class PersistentMcpClient {
       return this.client;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
+
       // Enhanced error handling for CORS issues
       if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin') || errorMessage.includes('blocked')) {
         spinner.error(`CORS error connecting to FastMCP server. Make sure the server at ${uri} has proper CORS headers configured.`);
@@ -171,7 +171,7 @@ class PersistentMcpClient {
       } else {
         spinner.error(errorMessage);
       }
-      
+
       this.isConnected = false;
 
       // Schedule reconnect if appropriate
@@ -214,26 +214,27 @@ class PersistentMcpClient {
     }
   }
 
-  /**
-   * Schedule a reconnection attempt
-   * CRITICAL: No automatic reconnection - all reconnection is user-driven
-   */
   private scheduleReconnect(): void {
     // Clear any existing reconnect timeout
     if (this.reconnectTimeoutId) {
       clearTimeout(this.reconnectTimeoutId);
       this.reconnectTimeoutId = null;
     }
-    
-    // Log that we're not automatically reconnecting
-    console.log('[PersistentMcpClient] No automatic reconnection - reconnection is user-driven only');
-    
-    // Reset reconnect attempts counter to ensure we don't hit the max limit
-    // This allows user-initiated reconnects to always work
-    this.reconnectAttempts = 0;
-    
-    // Do not schedule any automatic reconnection
-    // All reconnection must be explicitly initiated by the user through the UI
+
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts); // Exponential backoff
+      console.log(`[PersistentMcpClient] Scheduling reconnect attempt <span class="math-inline">\{this\.reconnectAttempts \+ 1\}/</span>{this.maxReconnectAttempts} in ${delay / 1000} seconds...`);
+      this.reconnectTimeoutId = setTimeout(() => {
+        this.reconnectAttempts++;
+        this.connect(this.serverUrl).catch(error => {
+          console.error(`[PersistentMcpClient] Reconnect attempt failed: ${error.message}`);
+          // The error is already handled by createConnection, so we just catch to prevent unhandled promise rejection
+        });
+      }, delay);
+    } else {
+      console.warn(`[PersistentMcpClient] Maximum reconnect attempts (${this.maxReconnectAttempts}) reached. Stopping automatic reconnection.`);
+      // Potentially notify UI or log a critical error here
+    }
   }
 
   /**
@@ -473,7 +474,7 @@ async function isServerAvailable(url: string): Promise<boolean> {
 
     try {
       // Use fetch with HEAD method to check if server is available
-       await fetch(url, {
+      await fetch(url, {
         method: 'HEAD',
         mode: 'no-cors', // Use no-cors to avoid CORS issues during check
       });
