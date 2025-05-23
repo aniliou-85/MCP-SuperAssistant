@@ -105,7 +105,7 @@ To connect the Chrome extension to a local server for proxying connections:
 1. Start the proxy server using one of the commands above
 2. Open the MCP SuperAssistant sidebar in your AI platform
 3. Click on the server status indicator (usually showing as "Disconnected")
-4. Enter the local server URL (default: `http://localhost:3006`)
+4. Enter the local server URL (default: `http://localhost:9121`)
 5. Click "Connect" to establish the connection
 6. The status indicator should change to "Connected" if successful
 
