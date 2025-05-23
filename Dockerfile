@@ -3,25 +3,42 @@
 # Stage 1: Base Node.js environment with pnpm
 FROM node:22.12.0-alpine AS base
 
+# Set environment variables for pnpm
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+
 # Install pnpm globally
 RUN npm install -g pnpm@9.15.1
+RUN apk add bash
 
 # Set working directory
 WORKDIR /app
 
 # Copy package manager configuration
-COPY .npmrc pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY .npmrc pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.json eslint.config.ts ./
+COPY bash-scripts ./bash-scripts
 
 # Stage 2: Dependencies installation
 FROM base AS deps
 
-# Copy all package.json files from workspace packages
-COPY packages/*/package.json ./packages/*/
-COPY chrome-extension/package.json ./chrome-extension/
-COPY pages/*/package.json ./pages/*/
+# Create workspace directory structure and copy package.json files
+COPY packages/dev-utils/*.json ./packages/dev-utils/
+COPY packages/env/*.json ./packages/env/
+COPY packages/hmr/*.json ./packages/hmr/
+COPY packages/i18n/*.json ./packages/i18n/
+COPY packages/module-manager/*.json ./packages/module-manager/
+COPY packages/shared/*.json ./packages/shared/
+COPY packages/storage/*.json ./packages/storage/
+COPY packages/tailwind-config/*.json ./packages/tailwind-config/
+COPY packages/tsconfig/*.json ./packages/tsconfig/
+COPY packages/ui/*.json ./packages/ui/
+COPY packages/vite-config/*.json ./packages/vite-config/
+COPY packages/zipper/*.json ./packages/zipper/
+COPY chrome-extension/*.json ./chrome-extension/
+COPY pages/content/*.json ./pages/content/
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # Stage 3: Development environment
 FROM base AS development
@@ -64,11 +81,11 @@ WORKDIR /app
 
 # Copy built artifacts
 COPY --from=builder /app/chrome-extension/dist ./chrome-extension/dist
-COPY --from=builder /app/pages/*/dist ./pages/
+COPY --from=builder /app/pages/content/dist ./pages/
 COPY --from=builder /app/package.json ./
 
 # Copy utility scripts if needed
-COPY --from=builder /app/bash-scripts ./bash-scripts
+COPY --from=base /app/bash-scripts ./bash-scripts
 
 # Create a simple script to zip the extension
 RUN echo '#!/bin/sh' > /app/create-zip.sh && \

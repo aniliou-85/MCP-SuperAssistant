@@ -127,7 +127,7 @@ function Invoke-BuildFirefox {
         Write-Error "Firefox build failed"
         exit $LASTEXITCODE
     }
-    Write-Message "Firefox build complete! Check the chrome-extension/dist directory."
+    Write-Message "Firefox build complete! Check the dist directory."
 }
 
 # Package function
