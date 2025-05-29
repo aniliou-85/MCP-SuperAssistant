@@ -12,11 +12,6 @@ import { sendAnalyticsEvent, trackError } from '../../utils/analytics';
 // Default MCP server URL
 const DEFAULT_MCP_SERVER_URL = 'http://localhost:3006/sse';
 
-// Define server connection state
-let isConnecting = false;
-let connectionAttemptCount = 0;
-const MAX_CONNECTION_ATTEMPTS = 3;
-
 /**
  * Initialize the extension
  * This function is called once when the extension starts
@@ -40,13 +35,6 @@ async function initializeExtension() {
 
   console.log('Extension initialized successfully');
 
-  // After initialization is complete, try connecting to the server asynchronously
-  setTimeout(() => {
-    tryConnectToServer(serverUrl).catch(() => {
-      // Silently ignore errors - we've already logged them
-      // and the extension should continue running
-    });
-  }, 1000);
 }
 
 // Initialize server URL from storage or use default
@@ -62,81 +50,29 @@ async function initializeServerUrl(): Promise<string> {
   }
 }
 
-/**
- * Try to connect to the MCP server with retry logic
- * This function is separated from extension initialization to prevent blocking
- */
 async function tryConnectToServer(uri: string): Promise<void> {
-  if (isConnecting) {
-    console.log('Connection attempt already in progress, skipping');
-    return;
-  }
-
-  isConnecting = true;
-  connectionAttemptCount++;
-
-  console.log(
-    `Attempting to connect to MCP server (attempt ${connectionAttemptCount}/${MAX_CONNECTION_ATTEMPTS}): ${uri}`,
-  );
-
   try {
     await runWithSSE(uri);
-
     console.log('MCP client connected successfully');
     mcpInterface.updateConnectionStatus(true);
-    connectionAttemptCount = 0; // Reset counter on success
   } catch (error: any) {
     console.warn(`MCP server unavailable: ${error.message || String(error)}`);
     console.log('Extension will continue to function with limited capabilities');
     mcpInterface.updateConnectionStatus(false);
-
-    // Schedule another attempt if we haven't reached the limit
-    if (connectionAttemptCount < MAX_CONNECTION_ATTEMPTS) {
-      const delayMs = Math.min(5000 * connectionAttemptCount, 15000); // Exponential backoff with cap
-      console.log(`Scheduling next connection attempt in ${delayMs / 1000} seconds...`);
-
-      setTimeout(() => {
-        isConnecting = false; // Reset connecting flag
-        tryConnectToServer(uri).catch(() => {}); // Try again
-      }, delayMs);
-    } else {
-      console.log('Maximum connection attempts reached. Will try again during periodic check.');
-      isConnecting = false;
-    }
-  } finally {
-    if (connectionAttemptCount >= MAX_CONNECTION_ATTEMPTS) {
-      isConnecting = false;
-    }
+    // The persistentClient will now handle retries internally
   }
 }
 
 // Set up a periodic connection check
 const PERIODIC_CHECK_INTERVAL = 60000; // 1 minute
 setInterval(async () => {
-  if (isConnecting) {
-    return; // Skip if already connecting
-  }
-
-  // Check current connection status
-  const isConnected = await checkMcpServerConnection();
-  mcpInterface.updateConnectionStatus(isConnected);
-
-  // If not connected and we're not in the middle of connecting, try to connect
-  if (!isConnected && !isConnecting) {
-    connectionAttemptCount = 0; // Reset counter for periodic checks
-    console.log('Periodic check: MCP server not connected, attempting to connect');
-    const serverUrl = await initializeServerUrl();
-    tryConnectToServer(serverUrl).catch(() => {});
+  // If not connected, try to connect. The persistentClient will handle backoff and retries.
+  if (!isMcpServerConnected()) {
+    console.log('Periodic check: MCP server not connected, attempting to connect...');
+    const serverUrl = await initializeServerUrl(); // Ensure we have the latest URL
+    tryConnectToServer(serverUrl).catch(() => {}); // tryConnectToServer will now just initiate the connection
   }
 }, PERIODIC_CHECK_INTERVAL);
-
-// Log active connections periodically
-setInterval(() => {
-  const connectionCount = mcpInterface.getConnectionCount();
-  if (connectionCount > 0) {
-    console.log(`Active MCP content script connections: ${connectionCount}`);
-  }
-}, 60000);
 
 // --- Error Handling ---
 // Listen for unhandled errors in the service worker
