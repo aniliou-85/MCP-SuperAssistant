@@ -30,6 +30,7 @@ const manifest = {
   version: packageJson.version,
   description: 'MCP SuperAssistant',
   host_permissions: [
+    // AI Platform permissions
     '*://*.perplexity.ai/*',
     '*://*.chat.openai.com/*',
     '*://*.chatgpt.com/*',
@@ -43,6 +44,16 @@ const manifest = {
     '*://*.chat.deepseek.com/*',
     '*://*.kagi.com/*',
     '*://*.t3.chat/*',
+    // MCP/FastMCP Server permissions
+    'http://localhost:*/*',
+    'https://localhost:*/*',
+    'http://127.0.0.1:*/*',
+    'https://127.0.0.1:*/*',
+    'http://0.0.0.0:*/*',
+    'https://0.0.0.0:*/*',
+    // Allow connections to any server (needed for arbitrary FastMCP servers)
+    'http://*/*',
+    'https://*/*',
   ],
 
   permissions: ['storage', 'clipboardWrite'],
@@ -139,5 +150,6 @@ const manifest = {
   //   default_path: 'side-panel/index.html',
   // },
 } satisfies chrome.runtime.ManifestV3;
+;
 
 export default manifest;
