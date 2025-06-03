@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSiteAdapter } from '@src/adapters/adapterRegistry';
 import ServerStatus from './ServerStatus/ServerStatus';
 import AvailableTools from './AvailableTools/AvailableTools';
@@ -32,37 +32,107 @@ type DetectedTool = {
   callId?: string;
 };
 
-const Sidebar: React.FC = () => {
+interface SidebarProps {
+  initialPreferences?: SidebarPreferences | null;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ initialPreferences }) => {
+  // Add unique ID to track component instances
+  const componentId = useRef(`sidebar-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+  logMessage(
+    `[Sidebar] Component initializing with preferences: ${initialPreferences ? 'loaded' : 'null'} (ID: ${componentId.current})`,
+  );
+
   const adapter = useSiteAdapter();
-  // Get communication methods with fallback for failed initialization
+
+  // No error states that could block rendering
+  const [initializationError, setInitializationError] = useState<string | null>(null);
+
+  // Get communication methods with guaranteed safe fallbacks
   const communicationMethods = useBackgroundCommunication();
-  
-  // Use a single source of truth for server status from the useBackgroundCommunication hook
-  // This is the most reliable source as it's already set up to handle all connection status updates
+
+  // Always render immediately - use safe defaults for all communication methods
   const serverStatus = communicationMethods?.serverStatus || 'disconnected';
   const availableTools = communicationMethods?.availableTools || [];
-  const sendMessage = communicationMethods?.sendMessage || (async () => 'Error: Communication unavailable');
+  const sendMessage = communicationMethods?.sendMessage || (async () => 'Communication not available');
   const refreshTools = communicationMethods?.refreshTools || (async () => []);
   const forceReconnect = communicationMethods?.forceReconnect || (async () => false);
-  
+
   // Debug logging for serverStatus changes
   useEffect(() => {
     logMessage(`[Sidebar] serverStatus changed to: "${serverStatus}", passing to ServerStatus component`);
   }, [serverStatus]);
 
-  const [isMinimized, setIsMinimized] = useState(false);
+  // Get initial state from shadow host to prevent flash
+  const getInitialMinimizedState = (): boolean => {
+    // Use passed preferences first (most reliable)
+    if (initialPreferences !== undefined && initialPreferences !== null) {
+      const value = initialPreferences.isMinimized ?? false;
+      logMessage(`[Sidebar] Using initialPreferences for isMinimized: ${value}`);
+      return value;
+    }
+
+    // Fallback to shadow host attribute
+    try {
+      const sidebarManager = (window as any).activeSidebarManager;
+      const shadowHost = sidebarManager?.getShadowHost();
+      if (shadowHost) {
+        const attrValue = shadowHost.getAttribute('data-initial-minimized');
+        logMessage(`[Sidebar] DEBUG: Raw attribute value: ${JSON.stringify(attrValue)}`);
+
+        if (attrValue === null || attrValue === undefined) {
+          logMessage(`[Sidebar] WARNING: data-initial-minimized attribute is null/undefined, defaulting to false`);
+          return false;
+        }
+
+        const isMinimized = attrValue === 'true';
+        logMessage(
+          `[Sidebar] Shadow host attribute 'data-initial-minimized' = '${attrValue}', interpreted as: ${isMinimized}`,
+        );
+        return isMinimized;
+      } else {
+        logMessage(`[Sidebar] Shadow host not found, defaulting to false`);
+        return false;
+      }
+    } catch (error) {
+      logMessage(`[Sidebar] Error reading initial state, defaulting to false: ${error}`);
+      return false;
+    }
+  };
+
+  // Initialize states with proper defaults to prevent flash
+  const isInitiallyMinimized = getInitialMinimizedState();
+
+  // CRITICAL FIX: If attribute was null but we expect it to have a value, set it
+  useEffect(() => {
+    try {
+      const sidebarManager = (window as any).activeSidebarManager;
+      const shadowHost = sidebarManager?.getShadowHost();
+      if (shadowHost) {
+        const currentAttr = shadowHost.getAttribute('data-initial-minimized');
+        if (currentAttr === null || currentAttr === undefined) {
+          // Attribute was not set properly, set it now based on our initialization
+          const valueToSet = isInitiallyMinimized ? 'true' : 'false';
+          shadowHost.setAttribute('data-initial-minimized', valueToSet);
+          logMessage(`[Sidebar] CORRECTED: Set missing data-initial-minimized to '${valueToSet}'`);
+        }
+      }
+    } catch (error) {
+      logMessage(`[Sidebar] Error correcting data-initial-minimized: ${error}`);
+    }
+  }, [isInitiallyMinimized]);
+
+  const [isMinimized, setIsMinimized] = useState(isInitiallyMinimized);
   const [detectedTools, setDetectedTools] = useState<DetectedTool[]>([]);
   const [activeTab, setActiveTab] = useState<'availableTools' | 'instructions'>('availableTools');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
-  const [isPushMode, setIsPushMode] = useState(false);
-  const [autoSubmit, setAutoSubmit] = useState(false);
-  const [theme, setTheme] = useState<Theme>('system');
+  const [sidebarWidth, setSidebarWidth] = useState(initialPreferences?.sidebarWidth || SIDEBAR_DEFAULT_WIDTH);
+  const [isPushMode, setIsPushMode] = useState(initialPreferences?.isPushMode || false);
+  const [autoSubmit, setAutoSubmit] = useState(initialPreferences?.autoSubmit || false);
+  const [theme, setTheme] = useState<Theme>(initialPreferences?.theme || 'system');
   const [isTransitioning, setIsTransitioning] = useState(false); // Single state for all transitions
-  const [isInitialRender, setIsInitialRender] = useState(true);
   const [isInputMinimized, setIsInputMinimized] = useState(false);
-  // Add a state to track if component loading is complete, regardless of background services
-  const [isComponentLoadingComplete, setIsComponentLoadingComplete] = useState(false);
+  const [preferencesLoaded, setPreferencesLoaded] = useState(initialPreferences !== null); // Start as loaded if we have initial preferences
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -75,25 +145,56 @@ const Sidebar: React.FC = () => {
   const applyTheme = useCallback((selectedTheme: Theme) => {
     const sidebarManager = (window as any).activeSidebarManager;
     if (!sidebarManager) {
-      logMessage('[Sidebar] Cannot apply theme: Sidebar manager not found.');
+      logMessage('[Sidebar] Sidebar manager not available for theme application - will apply when ready.');
       return;
     }
 
-    // Use the BaseSidebarManager's applyThemeClass method instead of direct manipulation
-    const success = sidebarManager.applyThemeClass(selectedTheme);
-    if (!success) {
-      logMessage('[Sidebar] Failed to apply theme using sidebar manager.');
+    // OPTIMIZATION: Theme application is now CSS-only and doesn't trigger re-renders
+    try {
+      const success = sidebarManager.applyThemeClass(selectedTheme);
+      if (!success) {
+        logMessage('[Sidebar] Theme application failed but continuing...');
+      }
+    } catch (error) {
+      logMessage(`[Sidebar] Theme application error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }, []);
 
   // Effect to apply theme and listen for system changes
+  // OPTIMIZATION: Throttle theme changes to avoid excessive calls
+  const lastThemeChangeRef = useRef<number>(0);
+
   useEffect(() => {
-    applyTheme(theme); // Apply theme initially
+    // Throttle theme applications to once every 100ms
+    const now = Date.now();
+    if (now - lastThemeChangeRef.current < 100) {
+      return;
+    }
+    lastThemeChangeRef.current = now;
+
+    // Apply theme safely without blocking
+    try {
+      applyTheme(theme);
+    } catch (error) {
+      logMessage(
+        `[Sidebar] Theme application error during useEffect: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = () => {
       if (theme === 'system') {
-        applyTheme('system'); // Re-apply system theme on change
+        const changeNow = Date.now();
+        if (changeNow - lastThemeChangeRef.current < 100) {
+          return; // Throttle system theme changes
+        }
+        lastThemeChangeRef.current = changeNow;
+
+        try {
+          applyTheme('system'); // Re-apply system theme on change
+        } catch (error) {
+          logMessage(`[Sidebar] Theme reapplication error: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     };
 
@@ -107,46 +208,68 @@ const Sidebar: React.FC = () => {
   }, [theme, applyTheme]);
   // --- End Theme Application Logic ---
 
-  // Load preferences from storage on initial render
+  // Load preferences immediately but never block rendering - only if not provided initially
   useEffect(() => {
+    // Skip loading if preferences were already provided
+    if (initialPreferences !== null) {
+      logMessage('[Sidebar] Using initial preferences, skipping async load');
+      isInitialLoadRef.current = false;
+      return;
+    }
+
     const loadPreferences = async () => {
       try {
+        logMessage('[Sidebar] Loading preferences...');
         const preferences = await getSidebarPreferences();
         logMessage(`[Sidebar] Loaded preferences: ${JSON.stringify(preferences)}`);
 
-        // Apply stored settings
+        // Apply stored settings - use batched state updates
+        logMessage(
+          `[Sidebar] Applying preferences - isPushMode: ${preferences.isPushMode}, isMinimized: ${preferences.isMinimized}, sidebarWidth: ${preferences.sidebarWidth}`,
+        );
         setIsPushMode(preferences.isPushMode);
         setSidebarWidth(preferences.sidebarWidth || SIDEBAR_DEFAULT_WIDTH);
         setIsMinimized(preferences.isMinimized ?? false);
         setAutoSubmit(preferences.autoSubmit || false);
         setTheme(preferences.theme || 'system');
         previousWidthRef.current = preferences.sidebarWidth || SIDEBAR_DEFAULT_WIDTH;
+
+        logMessage('[Sidebar] Preferences applied successfully');
+
+        // Mark preferences as loaded
+        logMessage('[Sidebar] Setting preferencesLoaded to true');
+        setPreferencesLoaded(true);
+
+        // Clean up initial state attributes after preferences are applied
+        setTimeout(() => {
+          try {
+            const sidebarManager = (window as any).activeSidebarManager;
+            const shadowHost = sidebarManager?.getShadowHost();
+            if (shadowHost?.getAttribute('data-initial-minimized') && !preferences.isMinimized) {
+              // Only remove if we're not actually minimized
+              shadowHost.removeAttribute('data-initial-minimized');
+              shadowHost.style.removeProperty('width');
+              logMessage('[Sidebar] Cleaned up initial state attributes');
+            }
+          } catch (error) {
+            logMessage(
+              `[Sidebar] Error cleaning up initial state: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }, 100);
       } catch (error) {
-        logMessage(`[Sidebar] Error loading preferences: ${error instanceof Error ? error.message : String(error)}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logMessage(`[Sidebar] Error loading preferences (non-blocking): ${errorMessage}`);
+        // Never block the UI for preference loading failures
+        setPreferencesLoaded(true); // Mark as loaded even on error to prevent blocking
       } finally {
         isInitialLoadRef.current = false;
-
-        // Delay disabling the initial render flag to prevent flickering
-        setTimeout(() => {
-          setIsInitialRender(false);
-          setIsComponentLoadingComplete(true);
-        }, 200);
       }
     };
 
+    // Start loading immediately but don't wait
     loadPreferences();
-
-    // Ensure loading completes even if preferences fail
-    const timeoutId = setTimeout(() => {
-      if (!isComponentLoadingComplete) {
-        logMessage('[Sidebar] Forcing component loading complete after timeout');
-        setIsComponentLoadingComplete(true);
-        setIsInitialRender(false);
-      }
-    }, 1000);
-
-    return () => clearTimeout(timeoutId);
-  }, []);
+  }, [initialPreferences]); // Load preferences once on mount or when initialPreferences changes
 
   // Save preferences when they change
   useEffect(() => {
@@ -215,31 +338,44 @@ const Sidebar: React.FC = () => {
   //   };
   // }, [adapter]);
 
-  // Effect to apply push mode and width changes to the manager
+  // Apply push mode and width changes safely - only when preferences are first loaded
   useEffect(() => {
-    const sidebarManager = (window as any).activeSidebarManager; // Or get it via context/props if available
-    if (sidebarManager) {
-      // Only apply push mode settings if the sidebar is currently visible
-      if (sidebarManager.getIsVisible()) {
-        logMessage(
-          `[Sidebar] Applying push mode (${isPushMode}, minimized: ${isMinimized}) and width (${sidebarWidth}) to BaseSidebarManager`,
-        );
-        // Pass minimized width if minimized, otherwise sidebarWidth
-        sidebarManager.setPushContentMode(
-          isPushMode,
-          isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth,
-          isMinimized,
-        );
+    // Only run when preferences are loaded for the first time
+    if (!preferencesLoaded) {
+      return;
+    }
 
-        // If only width changed while push mode is active, update styles
-        // Added checks to prevent unnecessary updates during resize or initial load
-        if (isPushMode && !isInitialLoadRef.current && !isResizingRef.current) {
-          sidebarManager.updatePushModeStyles(isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth);
+    logMessage(`[Sidebar] Preferences loaded - applying initial push mode settings`);
+
+    const sidebarManager = (window as any).activeSidebarManager;
+    if (sidebarManager) {
+      try {
+        // Only apply push mode settings if the sidebar is currently visible
+        if (sidebarManager.getIsVisible()) {
+          logMessage(
+            `[Sidebar] Applying push mode (${isPushMode}, minimized: ${isMinimized}) and width (${sidebarWidth}) to BaseSidebarManager`,
+          );
+          // Pass minimized width if minimized, otherwise sidebarWidth
+          sidebarManager.setPushContentMode(
+            isPushMode,
+            isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth,
+            isMinimized,
+          );
+
+          // If only width changed while push mode is active, update styles
+          // Added checks to prevent unnecessary updates during resize or initial load
+          if (isPushMode && !isInitialLoadRef.current && !isResizingRef.current) {
+            sidebarManager.updatePushModeStyles(isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth);
+          }
+        } else {
+          logMessage('[Sidebar] Sidebar is hidden, skipping application of push mode/width preferences.');
+          // Ensure push mode is explicitly turned off if the sidebar should be hidden
+          sidebarManager.setPushContentMode(false);
         }
-      } else {
-        logMessage('[Sidebar] Sidebar is hidden, skipping application of push mode/width preferences.');
-        // Ensure push mode is explicitly turned off if the sidebar should be hidden
-        sidebarManager.setPushContentMode(false);
+      } catch (error) {
+        logMessage(
+          `[Sidebar] Error applying push mode settings: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     } else {
       logMessage('[Sidebar] Sidebar manager not found when trying to apply push mode/width.');
@@ -251,7 +387,48 @@ const Sidebar: React.FC = () => {
     }
     // Reset resize ref after applying changes
     isResizingRef.current = false;
-  }, [isPushMode, sidebarWidth, isMinimized, adapter]); // Re-run when these change
+  }, [preferencesLoaded]); // Only depend on preferencesLoaded
+
+  // Separate effect for handling live changes to push mode settings
+  useEffect(() => {
+    // Skip if preferences haven't been loaded yet
+    if (!preferencesLoaded) {
+      return;
+    }
+
+    // Skip during initial load to prevent duplicate applications
+    if (isInitialLoadRef.current) {
+      return;
+    }
+
+    logMessage(`[Sidebar] Push mode settings changed - updating BaseSidebarManager`);
+
+    const sidebarManager = (window as any).activeSidebarManager;
+    if (sidebarManager) {
+      try {
+        if (sidebarManager.getIsVisible()) {
+          logMessage(
+            `[Sidebar] Updating push mode (${isPushMode}, minimized: ${isMinimized}) and width (${sidebarWidth}) to BaseSidebarManager`,
+          );
+          sidebarManager.setPushContentMode(
+            isPushMode,
+            isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth,
+            isMinimized,
+          );
+
+          if (isPushMode && !isResizingRef.current) {
+            sidebarManager.updatePushModeStyles(isMinimized ? SIDEBAR_MINIMIZED_WIDTH : sidebarWidth);
+          }
+        } else {
+          sidebarManager.setPushContentMode(false);
+        }
+      } catch (error) {
+        logMessage(
+          `[Sidebar] Error updating push mode settings: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }, [isPushMode, sidebarWidth, isMinimized, adapter]); // Dependencies for live updates
 
   // Simple transition management
   const startTransition = () => {
@@ -262,15 +439,34 @@ const Sidebar: React.FC = () => {
 
     setIsTransitioning(true);
 
+    // Add visual feedback to sidebar during transition
+    if (sidebarRef.current) {
+      sidebarRef.current.classList.add('sidebar-transitioning');
+    }
+
     // Set timeout to end transition
     transitionTimerRef.current = window.setTimeout(() => {
       setIsTransitioning(false);
+      if (sidebarRef.current) {
+        sidebarRef.current.classList.remove('sidebar-transitioning');
+      }
       transitionTimerRef.current = null;
     }, 500) as unknown as number;
   };
 
   const toggleMinimize = () => {
     startTransition();
+
+    // Add a subtle bounce effect to the toggle
+    if (sidebarRef.current) {
+      sidebarRef.current.style.transform = 'scale(0.98)';
+      setTimeout(() => {
+        if (sidebarRef.current) {
+          sidebarRef.current.style.transform = '';
+        }
+      }, 100);
+    }
+
     setIsMinimized(!isMinimized);
   };
 
@@ -369,7 +565,10 @@ const Sidebar: React.FC = () => {
       await refreshTools(true);
       logMessage('[Sidebar] Tools refreshed successfully');
     } catch (error) {
-      logMessage(`[Sidebar] Error refreshing tools: ${error instanceof Error ? error.message : String(error)}`);
+      logMessage(
+        `[Sidebar] Error refreshing tools (non-blocking): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      // Don't show error to user - this is a background operation
     } finally {
       setIsRefreshing(false);
     }
@@ -418,7 +617,6 @@ const Sidebar: React.FC = () => {
         isResizingRef.current ? 'resizing' : '',
         isMinimized ? 'collapsed' : '',
         isTransitioning ? 'sidebar-transitioning' : '',
-        isInitialRender ? 'initial-render' : '',
       )}
       style={{ width: isMinimized ? `${SIDEBAR_MINIMIZED_WIDTH}px` : `${sidebarWidth}px` }}>
       {/* Resize Handle - only visible when not minimized */}
@@ -436,7 +634,7 @@ const Sidebar: React.FC = () => {
         {!isMinimized ? (
           <>
             <div className="flex items-center space-x-2">
-              {/* Replace settings icon with logo, make it larger and linkable */}
+              {/* Always show the header content immediately */}
               <a
                 href="https://mcpsuperassistant.ai/"
                 target="_blank"
@@ -451,34 +649,28 @@ const Sidebar: React.FC = () => {
                   className="w-8 h-8 rounded-md " // Increase size & add rounded corners
                 />
               </a>
-              {isComponentLoadingComplete ? (
-                <>
-                  {/* Wrap title in link */}
-                  <a
-                    href="https://mcpsuperassistant.ai/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-slate-800 dark:text-slate-100 hover:text-slate-600 dark:hover:text-slate-300 transition-colors duration-150 no-underline"
-                    aria-label="Visit MCP Super Assistant Website">
-                    <Typography variant="h4" className="font-semibold">
-                      MCP SuperAssistant
-                    </Typography>
-                  </a>
-                  {/* Existing icon link */}
-                  <a
-                    href="https://mcpsuperassistant.ai/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="ml-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors duration-150"
-                    aria-label="Visit MCP Super Assistant Website">
-                    <Icon name="arrow-up-right" size="xs" className="inline-block align-baseline" />
-                  </a>
-                </>
-              ) : (
-                <Typography variant="h4" className="font-semibold text-slate-800 dark:text-slate-100">
-                  MCP SuperAssistant
-                </Typography>
-              )}
+              <>
+                {/* Wrap title in link */}
+                <a
+                  href="https://mcpsuperassistant.ai/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-slate-800 dark:text-slate-100 hover:text-slate-600 dark:hover:text-slate-300 transition-colors duration-150 no-underline"
+                  aria-label="Visit MCP Super Assistant Website">
+                  <Typography variant="h4" className="font-semibold">
+                    MCP SuperAssistant
+                  </Typography>
+                </a>
+                {/* Existing icon link */}
+                <a
+                  href="https://mcpsuperassistant.ai/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ml-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors duration-150"
+                  aria-label="Visit MCP Super Assistant Website">
+                  <Icon name="arrow-up-right" size="xs" className="inline-block align-baseline" />
+                </a>
+              </>
             </div>
             <div className="flex items-center space-x-2 pr-1">
               {/* Theme Toggle Button */}
@@ -531,6 +723,32 @@ const Sidebar: React.FC = () => {
           )}
           style={{ width: `${sidebarWidth}px` }}>
           <div className="flex flex-col h-full">
+            {/* Critical Error Display - Only show for severe failures, never block UI */}
+            {initializationError && (
+              <div className="bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 p-3 flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start space-x-2">
+                    <Icon name="alert-triangle" size="sm" className="text-red-600 dark:text-red-400 mt-0.5" />
+                    <div className="flex-1">
+                      <Typography variant="subtitle" className="text-red-800 dark:text-red-200 font-medium">
+                        Warning
+                      </Typography>
+                      <Typography variant="caption" className="text-red-700 dark:text-red-300">
+                        Some features may be limited: {initializationError}
+                      </Typography>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setInitializationError(null)}
+                    className="border-red-300 dark:border-red-600 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-800">
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {/* Status and Settings section */}
             <div className="py-4 px-4 space-y-4 overflow-y-auto flex-shrink-0">
               <ServerStatus status={serverStatus} />

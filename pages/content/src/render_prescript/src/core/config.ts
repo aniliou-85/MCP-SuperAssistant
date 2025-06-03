@@ -99,8 +99,8 @@ export const WEBSITE_CONFIGS: Array<{
       streamingContainerSelectors: ['pre'],
       function_result_selector: [
         'div.flex.max-w-full.flex-col.relative.overflow-auto.gap-1.items-end',
-        'div.flex', 
-        'div.flex.items-end'
+        'div.flex',
+        'div.flex.items-end',
       ],
     },
   },
@@ -123,8 +123,8 @@ export const WEBSITE_CONFIGS: Array<{
   {
     urlPattern: 'kagi.com',
     config: {
-      targetSelectors: ['.codehilite'],
-      streamingContainerSelectors: ['pre'],
+      targetSelectors: ['.content pre', '.codehilite', 'pre'],
+      streamingContainerSelectors: ['pre', '.content'],
       function_result_selector: ['div[data-author="user"]'],
     },
   },

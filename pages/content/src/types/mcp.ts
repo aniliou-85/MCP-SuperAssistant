@@ -64,6 +64,9 @@ export interface BackgroundCommunication {
   refreshTools: (forceRefresh?: boolean) => Promise<Tool[]>;
   forceReconnect: () => Promise<boolean>;
   isReconnecting: boolean;
-  getServerConfig: () => Promise<ServerConfig>;
+  getServerConfig: (forceRefresh?: boolean) => Promise<ServerConfig>;
   updateServerConfig: (config: ServerConfig) => Promise<boolean>;
+  isInitialized: boolean;
+  initializationError: string | null;
+  lastConnectionError: string; // Add the last connection error field
 }
