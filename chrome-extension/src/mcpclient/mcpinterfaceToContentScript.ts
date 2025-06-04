@@ -4,6 +4,7 @@ import {
   isMcpServerConnected,
   forceReconnectToMcpServer,
   checkMcpServerConnection,
+  persistentClient, // Added this import
 } from './officialmcpclient';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -142,8 +143,6 @@ class McpInterface {
    */
   private async checkServerConnection(): Promise<boolean> {
     try {
-      // This function (checkMcpServerConnection) is assumed to be a lightweight check,
-      // possibly a HEAD request or using PersistentMcpClient's status if available.
       return await checkMcpServerConnection();
     } catch (error) {
       console.error('[MCP Interface] Error checking server connection:', error);
@@ -173,7 +172,7 @@ class McpInterface {
         };
       }
       console.log(`[MCP Interface] Performing lightweight verification for tool '${toolName}'`);
-      const primitives = await getPrimitivesWithSSE(this.serverUrl, false); // Assumes getPrimitivesWithSSE can be called even if primary connection is 'logically' down for UI
+      const primitives = await getPrimitivesWithSSE(this.serverUrl, false);
       const toolExists = primitives.some(primitive => primitive.type === 'tool' && primitive.value.name === toolName);
       if (toolExists) {
         return { exists: true, reason: 'Verified with server', cached: false };
@@ -203,7 +202,7 @@ class McpInterface {
       case 'CALL_TOOL':
         this.handleToolCall(connectionId, message);
         break;
-      case 'CHECK_CONNECTION': // This message type allows content script to explicitly request a status update
+      case 'CHECK_CONNECTION':
         this.sendConnectionStatus(connectionId, message.forceCheck === true);
         break;
       case 'GET_TOOL_DETAILS':
@@ -252,8 +251,7 @@ class McpInterface {
       return;
     }
     try {
-      // Ensure MCPInterface believes we are connected (or can connect) before trying tool specific verification
-      if (!this.isConnected && !(await this.checkServerConnection())) { // Quick check if not connected
+      if (!this.isConnected && !(await this.checkServerConnection())) {
           this.sendError(connectionId, 'SERVER_UNAVAILABLE', 'MCP server is not connected. Please connect first.', requestId);
           return;
       }
@@ -280,7 +278,7 @@ class McpInterface {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorCategory = this.categorizeError(error as Error);
       if (errorCategory.isConnectionError && !errorCategory.isToolError) {
-        this.isConnected = false; // Update main connection status on actual connection errors
+        this.isConnected = false;
         this.broadcastConnectionStatus();
       }
       const errorType = errorCategory.isToolError ? 'TOOL_CALL_ERROR' : errorCategory.isConnectionError ? 'CONNECTION_ERROR' : 'UNKNOWN_ERROR';
@@ -293,8 +291,6 @@ class McpInterface {
    */
   private async verifyToolExists(toolName: string): Promise<{ exists: boolean; reason?: string }> {
     try {
-      // This relies on getAvailableToolsFromServer which itself uses getPrimitivesWithSSE
-      // This path should be used carefully if the primary connection is meant to be "off"
       if (!this.isConnected && !(await this.checkServerConnection())) {
           return { exists: false, reason: "Cannot verify tool, server disconnected." };
       }
@@ -347,8 +343,6 @@ class McpInterface {
       return;
     }
     try {
-      // Before fetching tools, ensure the server is considered connectable by McpInterface
-      // This uses checkServerConnection which might do a live check if McpInterface thinks it's disconnected.
       if (!this.isConnected && !(await this.checkServerConnection())) {
         this.sendError(connectionId, 'SERVER_UNAVAILABLE', 'MCP server is not available. Please check your connection settings.', requestId);
         return;
@@ -375,14 +369,11 @@ class McpInterface {
       this.toolDetailsCache.lastFetch = Date.now();
       const tools = primitives.filter(p => p.type === 'tool');
       port.postMessage({ type: 'TOOL_DETAILS_RESULT', result: tools, requestId });
-      // If fetching tools succeeded, we can assume the connection is working.
       if (!this.isConnected) {
           this.isConnected = true;
           this.broadcastConnectionStatus();
       }
     } catch (error) {
-      // If getAvailableToolsFromServer itself throws a connection error, it might have already set isConnected to false.
-      // We ensure the status is consistent.
       const currentActualStatus = await this.checkServerConnection();
       if (this.isConnected !== currentActualStatus) {
         this.isConnected = currentActualStatus;
@@ -404,24 +395,20 @@ class McpInterface {
     if (!port) return;
     port.postMessage({ type: 'RECONNECT_STATUS', status: 'PROCESSING', requestId });
     try {
-      // forceReconnectToMcpServer handles PersistentMcpClient's connect logic
       await forceReconnectToMcpServer(this.serverUrl); 
-      // After attempting, update McpInterface's state based on PersistentMcpClient
-      this.isConnected = PersistentMcpClient.getInstance().getConnectionStatus(); 
+      this.isConnected = persistentClient.getConnectionStatus(); // Use imported persistentClient
 
       if (this.isConnected) {
         try {
-          const freshTools = await this.getAvailableToolsFromServer(true); // Force refresh tools on new connection
+          const freshTools = await this.getAvailableToolsFromServer(true); 
           this.broadcastToolsUpdate(freshTools);
         } catch (toolsError) { 
             console.error("[MCP Interface] Error fetching tools after reconnection:", toolsError);
-            // Proceed even if tool fetching fails, connection itself might be okay
         }
       }
       port.postMessage({ type: 'RECONNECT_RESULT', success: true, isConnected: this.isConnected, requestId });
-      this.broadcastConnectionStatus(); // Broadcast the definitive new status
+      this.broadcastConnectionStatus(); 
     } catch (reconnectError) {
-      // Reconnect failed, ensure our state reflects this
       this.isConnected = false; 
       this.broadcastConnectionStatus();
 
@@ -430,7 +417,6 @@ class McpInterface {
         return;
       }
       let userFriendlyMessage = reconnectError instanceof Error ? reconnectError.message : String(reconnectError);
-      // (User friendly message mapping remains the same)
       if (reconnectError instanceof Error) {
         if (reconnectError.message.includes('404') || reconnectError.message.includes('not found')) userFriendlyMessage = 'Server URL not found (404).';
         else if (reconnectError.message.includes('403')) userFriendlyMessage = 'Access forbidden (403).';
@@ -449,41 +435,35 @@ class McpInterface {
    */
   private async getAvailableToolsFromServer(forceRefresh: boolean = false): Promise<Primitive[]> {
     try {
-      // This uses PersistentMcpClient.getPrimitives() which has its own ensureConnection logic
-      const primitives = await PersistentMcpClient.getInstance().getPrimitives(); // Simplified to use the main client's method
+      if (forceRefresh) {
+        persistentClient.clearCache(); 
+      }
+      const primitives = await persistentClient.getPrimitives(); // Use imported persistentClient
       return primitives;
     } catch (error) {
       console.error('[MCP Interface] Failed to get available primitives:', error);
-      // If PersistentMcpClient.getPrimitives() fails due to connection, it will throw.
-      // We update our status based on that client's status.
-      this.isConnected = PersistentMcpClient.getInstance().getConnectionStatus();
+      this.isConnected = persistentClient.getConnectionStatus(); // Use imported persistentClient
       this.broadcastConnectionStatus();
-      // Re-throw the original error to be handled by the caller (e.g., handleGetToolDetails)
       throw error;
     }
   }
 
   /**
    * Send connection status to a specific content script
-   * @param connectionId The ID of the connection to send the status to
-   * @param forceCheck Whether to force a thorough check of the connection.
-   *                   If true, it uses checkServerConnection. If false, uses cached McpInterface.isConnected.
    */
   private async sendConnectionStatus(connectionId: string, forceCheck: boolean = false): Promise<void> {
     const port = this.connections.get(connectionId);
     if (port) {
       let statusToSend = this.isConnected;
       if (forceCheck) {
-        // If a force check is requested, we perform it and update our state.
         const liveStatus = await this.checkServerConnection();
         if (this.isConnected !== liveStatus) {
           this.isConnected = liveStatus;
-          this.broadcastConnectionStatus(); // Broadcast if state changed due to forced check
-          return; // broadcast will send to all, including this one.
+          this.broadcastConnectionStatus(); 
+          return; 
         }
-        statusToSend = liveStatus; // Use the freshly checked status
+        statusToSend = liveStatus; 
       }
-      // If no forceCheck, or if forceCheck didn't change status, send current statusToSend
       try {
         port.postMessage({ type: 'CONNECTION_STATUS', isConnected: statusToSend, message: statusToSend ? 'Connected to MCP server' : 'MCP server unavailable - extension running with limited capabilities' });
       } catch (error) {
@@ -505,7 +485,7 @@ class McpInterface {
   }
 
   /**
-   * Update the MCP server connection status. Called by PersistentMcpClient events or direct actions.
+   * Update the MCP server connection status.
    */
   public updateConnectionStatus(isConnected: boolean): void {
     if (this.isConnected !== isConnected) {
@@ -519,7 +499,6 @@ class McpInterface {
    */
   public updateServerUrl(url: string): void {
     this.serverUrl = url;
-    // Note: Changing URL doesn't automatically reconnect. A subsequent forceReconnect is needed.
   }
 
   /**
@@ -552,12 +531,12 @@ class McpInterface {
     const port = this.connections.get(connectionId);
     if (!port) return;
     try {
-      let currentServerUrl = this.serverUrl; // Start with in-memory
-      try { // Attempt to get latest from storage
+      let currentServerUrl = this.serverUrl; 
+      try { 
         const result = await chrome.storage.local.get('mcpServerUrl');
         if (result.mcpServerUrl) {
           currentServerUrl = result.mcpServerUrl;
-          if (this.serverUrl !== currentServerUrl) { // Keep in-memory updated if changed
+          if (this.serverUrl !== currentServerUrl) { 
              this.serverUrl = currentServerUrl;
           }
         }
@@ -580,25 +559,19 @@ class McpInterface {
       return;
     }
     try {
-      new URL(config.uri); // Validate URI
-      this.updateServerUrl(config.uri); // Update in-memory URL
+      new URL(config.uri); 
+      this.updateServerUrl(config.uri); 
       try {
-        await chrome.storage.local.set({ mcpServerUrl: config.uri }); // Save to storage
+        await chrome.storage.local.set({ mcpServerUrl: config.uri }); 
       } catch (storageError) { console.error(`[MCP Interface] Error saving server URL to storage:`, storageError); }
       
-      // After updating URL, a reconnect is implied/expected to use the new URL.
-      // We will trigger it here.
       console.log(`[MCP Interface] Server URL updated to ${config.uri}. Initiating reconnect.`);
-      // We call handleForceReconnect directly to reuse its logic, passing a dummy requestId for its internal use if needed.
-      // The original requestId from the content script is for the UPDATE_SERVER_CONFIG_RESULT.
       await this.handleForceReconnect(connectionId, { requestId: `reconnect-after-update-${requestId}` });
       
-      // The RECONNECT_RESULT and updated CONNECTION_STATUS will be sent by handleForceReconnect.
-      // We still send a success for the config update itself.
       port.postMessage({ type: 'UPDATE_SERVER_CONFIG_RESULT', success: true, requestId });
 
-    } catch (error) { // Catches errors from URI validation or if handleForceReconnect itself throws before sending its own error
-      this.isConnected = false; // Ensure disconnected state on error
+    } catch (error) { 
+      this.isConnected = false; 
       this.broadcastConnectionStatus();
       this.sendError(connectionId, 'SERVER_CONFIG_UPDATE_ERROR', `Failed to update server config: ${error instanceof Error ? error.message : String(error)}`, requestId);
     }
@@ -632,9 +605,7 @@ class McpInterface {
           this.connections.delete(connectionId);
           this.connectionLastActiveTimestamps.delete(connectionId);
         });
-        // Send the current known connection status to the new port
-        // without triggering a new network check.
-        this.sendConnectionStatus(connectionId, false); // false for forceCheck
+        this.sendConnectionStatus(connectionId, false); 
       }
     });
   }
@@ -647,7 +618,7 @@ class McpInterface {
     this.connections.forEach((port, connectionId) => {
       try {
         port.postMessage({ type: 'CONNECTION_STATUS', isConnected: this.isConnected, message: this.isConnected ? 'Connected to MCP server' : 'MCP server unavailable - extension running with limited capabilities' });
-      } catch (error) { // Port might be dead if content script was unloaded
+      } catch (error) { 
         console.warn(`[MCP Interface] Error sending connection status to ${connectionId}, removing port:`, error);
         this.connections.delete(connectionId);
         this.connectionLastActiveTimestamps.delete(connectionId);
@@ -655,9 +626,6 @@ class McpInterface {
     });
   }
 }
-
-
-
 
 // Export the singleton instance
 export const mcpInterface = McpInterface.getInstance();

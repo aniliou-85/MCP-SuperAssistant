@@ -672,7 +672,7 @@ async function listPrimitives(client: Client): Promise<Primitive[]> {
 }
 
 // Get the persistent client instance
-const persistentClient = PersistentMcpClient.getInstance();
+export const persistentClient = PersistentMcpClient.getInstance();
 
 /**
  * Call a tool on the MCP server using backwards compatible connection
