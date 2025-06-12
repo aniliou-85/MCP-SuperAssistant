@@ -335,7 +335,6 @@ class McpInterface {
    * Handle get tool details requests from content scripts with caching
    */
   private async handleGetToolDetails(connectionId: string, message: any): Promise<void> {
-    console.log(`[MCP Interface] handleGetToolDetails received message:`, JSON.stringify(message)); // Added log
     const { requestId, forceRefresh } = message;
     const port = this.connections.get(connectionId);
     if (!port) return;
@@ -435,10 +434,8 @@ class McpInterface {
    * Get available tools from the MCP server
    */
   private async getAvailableToolsFromServer(forceRefresh: boolean = false): Promise<Primitive[]> {
-    console.log(`[MCP Interface] getAvailableToolsFromServer called with forceRefresh: ${forceRefresh}`); 
     try {
       if (forceRefresh) {
-        console.log('[MCP Interface] forceRefresh is true, calling persistentClient.clearCache()'); 
         persistentClient.clearCache(); 
       }
       const primitives = await persistentClient.getPrimitives();
