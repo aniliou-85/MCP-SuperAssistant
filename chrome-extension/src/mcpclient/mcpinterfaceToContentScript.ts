@@ -335,6 +335,7 @@ class McpInterface {
    * Handle get tool details requests from content scripts with caching
    */
   private async handleGetToolDetails(connectionId: string, message: any): Promise<void> {
+    console.log(`[MCP Interface] handleGetToolDetails received message:`, JSON.stringify(message)); // Added log
     const { requestId, forceRefresh } = message;
     const port = this.connections.get(connectionId);
     if (!port) return;
@@ -363,7 +364,7 @@ class McpInterface {
         } catch (error) { /* Continue to new request */ }
       }
       this.toolDetailsCache.inProgress = true;
-      this.toolDetailsCache.fetchPromise = this.getAvailableToolsFromServer(!!forceRefresh);
+      this.toolDetailsCache.fetchPromise = this.getAvailableToolsFromServer(!!forceRefresh); 
       const primitives = await this.toolDetailsCache.fetchPromise;
       this.toolDetailsCache.primitives = primitives;
       this.toolDetailsCache.lastFetch = Date.now();
@@ -396,7 +397,7 @@ class McpInterface {
     port.postMessage({ type: 'RECONNECT_STATUS', status: 'PROCESSING', requestId });
     try {
       await forceReconnectToMcpServer(this.serverUrl); 
-      this.isConnected = persistentClient.getConnectionStatus(); // Use imported persistentClient
+      this.isConnected = persistentClient.getConnectionStatus(); 
 
       if (this.isConnected) {
         try {
@@ -434,15 +435,17 @@ class McpInterface {
    * Get available tools from the MCP server
    */
   private async getAvailableToolsFromServer(forceRefresh: boolean = false): Promise<Primitive[]> {
+    console.log(`[MCP Interface] getAvailableToolsFromServer called with forceRefresh: ${forceRefresh}`); 
     try {
       if (forceRefresh) {
+        console.log('[MCP Interface] forceRefresh is true, calling persistentClient.clearCache()'); 
         persistentClient.clearCache(); 
       }
-      const primitives = await persistentClient.getPrimitives(); // Use imported persistentClient
+      const primitives = await persistentClient.getPrimitives();
       return primitives;
     } catch (error) {
       console.error('[MCP Interface] Failed to get available primitives:', error);
-      this.isConnected = persistentClient.getConnectionStatus(); // Use imported persistentClient
+      this.isConnected = persistentClient.getConnectionStatus();
       this.broadcastConnectionStatus();
       throw error;
     }

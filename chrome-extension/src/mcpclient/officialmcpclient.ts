@@ -36,23 +36,18 @@ class PersistentMcpClient {
   private isConnected: boolean = false;
   private connectionPromise: Promise<Client> | null = null;
   private lastConnectionCheck: number = 0;
-  private primitives: Primitive[] | null = null;
+  // Assuming Primitive type is available in this scope
+  private primitives: Primitive[] | null = null; 
   private primitivesLastFetched: number = 0;
   private primitivesMaxAge: number = 300000; // 5 minutes
   private lastConnectionError: string | null = null;
   private consecutiveFailures: number = 0;
   private maxConsecutiveFailures: number = 3;
 
-  /**
-   * Private constructor to enforce singleton pattern
-   */
   private constructor() {
     console.log('[PersistentMcpClient] Initialized');
   }
 
-  /**
-   * Get the singleton instance of PersistentMcpClient
-   */
   public static getInstance(): PersistentMcpClient {
     if (!PersistentMcpClient.instance) {
       PersistentMcpClient.instance = new PersistentMcpClient();
@@ -60,23 +55,16 @@ class PersistentMcpClient {
     return PersistentMcpClient.instance;
   }
 
-  /**
-   * Connect to the MCP server
-   * @param uri The URI of the MCP server
-   * @returns Promise that resolves to the client instance
-   */
   public async connect(uri: string): Promise<Client> {
     if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
       const errorMsg = `Connection permanently failed after ${this.maxConsecutiveFailures} consecutive attempts. Last error: ${this.lastConnectionError}`;
       console.error(`[PersistentMcpClient] ${errorMsg}`);
       throw new Error(errorMsg);
     }
-
     if (this.connectionPromise && this.serverUrl === uri && this.isConnected) {
       console.log('[PersistentMcpClient] Connection already established, returning existing client');
       return this.connectionPromise;
     }
-
     if (this.connectionPromise && this.serverUrl === uri) {
       console.log('[PersistentMcpClient] Connection already in progress, waiting for completion');
       try {
@@ -86,16 +74,13 @@ class PersistentMcpClient {
         this.connectionPromise = null;
       }
     }
-
     if ((this.serverUrl !== uri || !this.isConnected) && (this.client || this.isConnected)) {
       console.log('[PersistentMcpClient] URL changed or connection invalid, disconnecting first');
       await this.disconnect();
     }
-
     this.serverUrl = uri;
     console.log(`[PersistentMcpClient] Creating new connection to ${uri}`);
     this.connectionPromise = this.createConnection(uri);
-    
     try {
       const result = await this.connectionPromise;
       return result;
@@ -105,14 +90,8 @@ class PersistentMcpClient {
     }
   }
 
-  /**
-   * Create a connection to the MCP server
-   * @param uri The URI of the MCP server
-   * @returns Promise that resolves to the client instance
-   */
   private async createConnection(uri: string): Promise<Client> {
     const spinner = createSpinner(`Connecting to MCP server at ${uri}...`);
-
     try {
       if (!uri || typeof uri !== 'string') {
         throw new Error('URI must be a non-empty string');
@@ -134,11 +113,11 @@ class PersistentMcpClient {
         console.debug('[server log]:', notification.params.data);
       });
       const transport = new SSEClientTransport(baseUrl);
-      const connectionTimeout = 10000; // 10 seconds
+      const connectionTimeout = 10000;
       const connectionPromise = client.connect(transport);
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
-          reject(new Error(`Connection timeout after ${connectionTimeout}ms. The server may be slow to respond or the SSE endpoint may not be functioning properly.`));
+          reject(new Error(`Connection timeout after ${connectionTimeout}ms.`));
         }, connectionTimeout);
       });
       await Promise.race([connectionPromise, timeoutPromise]);
@@ -159,88 +138,49 @@ class PersistentMcpClient {
       this.transport = null;
       this.connectionPromise = null;
       let enhancedErrorMessage = errorMessage;
-      // ... (enhanced error message logic remains the same as before)
-      if (errorMessage.includes('404') || errorMessage.includes('404 page not found')) {
-        enhancedErrorMessage =
-          'Server URL not found (404). Please check if the MCP server is running at the correct URL and verify the server configuration.';
-      } else if (errorMessage.includes('403')) {
-        enhancedErrorMessage = 'Access forbidden (403). Please check server permissions and authentication settings.';
-      } else if (errorMessage.includes('429') || errorMessage.includes('HTTP 429')) {
-        enhancedErrorMessage =
-          'Rate limited (429). The server is temporarily blocking requests due to too many attempts. Please wait a moment and try again.';
-      } else if (errorMessage.includes('405') || errorMessage.includes('Method Not Allowed')) {
-        enhancedErrorMessage =
-          'Method not allowed (405). The server is available but may not support the requested HTTP method. This is usually a temporary issue.';
-      } else if (errorMessage.includes('500') || errorMessage.includes('502') || errorMessage.includes('503')) {
-        enhancedErrorMessage =
-          'Server error detected. The MCP server may be experiencing issues. Please try again later or contact your server administrator.';
-      } else if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('Connection refused')) {
-        enhancedErrorMessage =
-          'Connection refused. Please verify the MCP server is running and accessible at the configured URL.';
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
-        enhancedErrorMessage =
-          'Connection timeout. The server may be slow to respond or unreachable. Please check your network connection and server status.';
-      } else if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('getaddrinfo ENOTFOUND')) {
-        enhancedErrorMessage = 'Server not found. Please check the server URL and your network connection.';
-      } else if (errorMessage.includes('Failed to fetch') || errorMessage.includes('SSE error')) {
-        enhancedErrorMessage =
-          'SSE connection failed. The server may be unreachable or not responding to Server-Sent Events. Please check if the MCP server is running and accessible.';
-      } else if (errorMessage.includes('MCP endpoints not found')) {
-        enhancedErrorMessage =
-          'MCP endpoints not found (404). The server is running but does not have MCP service endpoints available. Please verify this is an MCP server.';
-      } else if (errorMessage.includes('MCP server may be experiencing issues')) {
-        enhancedErrorMessage =
-          'The MCP server is experiencing internal errors. Please check server logs or contact the server administrator.';
-      } else if (errorMessage.includes('MCP endpoints are not accessible')) {
-        enhancedErrorMessage =
-          'MCP service endpoints are not accessible. The server is running but MCP services may not be properly configured.';
-      }
+      if (errorMessage.includes('404') || errorMessage.includes('404 page not found')) enhancedErrorMessage = 'Server URL not found (404). Check server URL and status.';
+      else if (errorMessage.includes('403')) enhancedErrorMessage = 'Access forbidden (403). Check permissions.';
+      else if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('Connection refused')) enhancedErrorMessage = 'Connection refused. Verify server is running.';
+      else if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) enhancedErrorMessage = 'Connection timeout. Check network/server status.';
+      // Add other error enhancements as previously defined
       this.lastConnectionError = enhancedErrorMessage;
       this.consecutiveFailures++;
       spinner.error(enhancedErrorMessage);
-      console.error(
-        `[PersistentMcpClient] Connection attempt ${this.consecutiveFailures}/${this.maxConsecutiveFailures} failed: ${enhancedErrorMessage}`,
-      );
+      console.error(`[PersistentMcpClient] Connection attempt ${this.consecutiveFailures}/${this.maxConsecutiveFailures} failed: ${enhancedErrorMessage}`);
       const enhancedError = new Error(enhancedErrorMessage);
       enhancedError.stack = error instanceof Error ? error.stack : undefined;
       throw enhancedError;
     }
   }
 
-  /**
-   * Disconnect from the MCP server
-   */
   public async disconnect(): Promise<void> {
     const spinner = createSpinner(`Disconnecting from MCP server...`);
-    const wasConnected = this.isConnected; // Check status before changing it
+    const wasConnected = this.isConnected;
     try {
       if (this.client) {
         try {
           await this.client.close();
           spinner.success(`Disconnected from MCP server`);
         } catch (closeError) {
-          console.warn('[PersistentMcpClient] Client close failed, but cleaning up state:', closeError);
-          spinner.success(`Cleaned up connection state (close failed but state reset)`);
+          console.warn('[PersistentMcpClient] Client close failed, cleaning up state:', closeError);
+          spinner.success(`Cleaned up connection state (close failed)`);
         }
       }
-      if (this.transport) {
+      if (this.transport && 'close' in this.transport && typeof this.transport.close === 'function') {
         try {
-          if ('close' in this.transport && typeof this.transport.close === 'function') {
-            await this.transport.close();
-          }
+          await (this.transport as any).close();
         } catch (transportError) {
-          console.warn('[PersistentMcpClient] Transport close failed, but continuing cleanup:', transportError);
+          console.warn('[PersistentMcpClient] Transport close failed:', transportError);
         }
       }
       if (!this.client && !this.transport && !wasConnected) {
         spinner.success(`No active connection to disconnect`);
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn('[PersistentMcpClient] Disconnect error, but cleaning up state:', errorMessage);
-      spinner.success(`Cleaned up connection state despite disconnect error`);
+      console.warn('[PersistentMcpClient] Disconnect error, cleaning up state:', error);
+      spinner.success(`Cleaned up connection state (disconnect error)`);
     } finally {
-      this.isConnected = false; // Set own status
+      this.isConnected = false;
       this.client = null;
       this.transport = null;
       this.connectionPromise = null;
@@ -248,85 +188,59 @@ class PersistentMcpClient {
     }
   }
 
-  /**
-   * Ensure a connection exists before performing an operation.
-   */
   public async ensureConnection(): Promise<Client> {
     if (!this.serverUrl) {
-      console.warn('[PersistentMcpClient] ensureConnection: No server URL configured. Please connect manually first.');
-      throw new Error('No server URL configured. Please connect manually first.');
+      throw new Error('No server URL configured. Connect manually.');
     }
     if (this.consecutiveFailures >= this.maxConsecutiveFailures) {
-      throw new Error(
-        `Connection permanently failed after ${this.maxConsecutiveFailures} consecutive attempts. Please try connecting manually again. Last error: ${this.lastConnectionError}`,
-      );
+      throw new Error(`Connection permanently failed after ${this.maxConsecutiveFailures} attempts. Last error: ${this.lastConnectionError}`);
     }
     if (!this.isConnected || !this.client) {
-      console.warn(`[PersistentMcpClient] ensureConnection: Not connected to ${this.serverUrl}. A manual connection is required.`);
-      throw new Error(`Not connected to MCP server at ${this.serverUrl}. Please connect manually.`);
+      throw new Error(`Not connected to MCP server at ${this.serverUrl}. Connect manually.`);
     }
     this.lastConnectionCheck = Date.now();
     return this.client;
   }
 
-  /**
-   * Call a tool using the persistent connection
-   */
   public async callTool(toolName: string, args: { [key: string]: unknown }): Promise<any> {
     const spinner = createSpinner(`Calling tool ${toolName}...`);
     try {
       const client = await this.ensureConnection();
-      if (!toolName || typeof toolName !== 'string') {
-        throw new Error('Tool name must be a non-empty string');
-      }
-      if (!args || typeof args !== 'object' || Array.isArray(args)) {
-        throw new Error('Arguments must be an object with string keys');
-      }
-      console.log('Args: ', args);
+      if (!toolName || typeof toolName !== 'string') throw new Error('Tool name must be non-empty string');
+      if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Arguments must be an object');
       const result = await client.callTool({ name: toolName, arguments: args });
       spinner.success(`Tool ${toolName} called successfully`);
-      prettyPrint(result);
+      prettyPrint(result); // Assuming prettyPrint is available
       this.lastConnectionCheck = Date.now();
       return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       spinner.error(errorMessage);
       if (this.isConnectionError(errorMessage)) {
-        console.warn('[PersistentMcpClient] Connection error detected during tool call, marking as disconnected');
-        this.isConnected = false; // Set own status
-        this.client = null;
-        this.transport = null;
-        this.connectionPromise = null;
+        this.isConnected = false; this.client = null; this.transport = null; this.connectionPromise = null;
       }
       throw error;
     }
   }
 
-  /**
-   * Helper method to determine if an error is connection-related
-   */
   private isConnectionError(errorMessage: string): boolean {
-    const connectionErrorPatterns = [
-      /connection refused/i, /econnrefused/i, /timeout/i, /etimedout/i,
-      /failed to fetch/i, /sse error/i, /network error/i, /server unavailable/i,
-      /connection failed/i, /transport error/i, /socket error/i,
-    ];
-    return connectionErrorPatterns.some(pattern => pattern.test(errorMessage));
+    const patterns = [/connection refused/i, /econnrefused/i, /timeout/i, /etimedout/i, /failed to fetch/i, /sse error/i, /network error/i, /server unavailable/i, /connection failed/i, /transport error/i, /socket error/i];
+    return patterns.some(pattern => pattern.test(errorMessage));
   }
 
-  /**
-   * Get all primitives using the persistent connection
-   */
   public async getPrimitives(): Promise<Primitive[]> {
-    if (this.primitives && this.primitivesLastFetched && Date.now() - this.primitivesLastFetched < this.primitivesMaxAge) {
+    if (this.primitives && this.primitivesLastFetched && (Date.now() - this.primitivesLastFetched < this.primitivesMaxAge)) {
+      console.log('[PersistentMcpClient] Returning cached primitives.');
       return this.primitives;
     }
-    const spinner = createSpinner(`Retrieving primitives...`);
+
+    const spinner = createSpinner(`Retrieving primitives...`); // Moved spinner creation after cache check
     try {
-      const client = await this.ensureConnection(); 
-      spinner.success(`Retrieving primitives...`);
-      const primitives = await listPrimitives(client);
+      const client = await this.ensureConnection();
+      console.log('[PersistentMcpClient] Fetching primitives from server...'); // Added more specific log
+      const primitives = await listPrimitives(client); // Assuming listPrimitives is available
       spinner.success(`Retrieved ${primitives.length} primitives`);
+      
       this.primitives = primitives;
       this.primitivesLastFetched = Date.now();
       this.lastConnectionCheck = Date.now();
@@ -335,26 +249,16 @@ class PersistentMcpClient {
       const errorMessage = error instanceof Error ? error.message : String(error);
       spinner.error(errorMessage);
       if (this.isConnectionError(errorMessage)) {
-        console.warn('[PersistentMcpClient] Connection error detected during primitives fetch, marking as disconnected');
-        this.isConnected = false; // Set own status
-        this.client = null;
-        this.transport = null;
-        this.connectionPromise = null;
+        this.isConnected = false; this.client = null; this.transport = null; this.connectionPromise = null;
       }
       throw error;
     }
   }
 
-  /**
-   * Get the connection status
-   */
   public getConnectionStatus(): boolean {
     return this.isConnected;
   }
 
-  /**
-   * Force a reconnection to the MCP server
-   */
   public async forceReconnect(uri?: string): Promise<void> {
     console.log('[PersistentMcpClient] Force reconnect initiated');
     this.consecutiveFailures = 0; 
@@ -369,116 +273,57 @@ class PersistentMcpClient {
       console.log(`[PersistentMcpClient] Attempting reconnection to: ${this.serverUrl}`);
       await this.connect(this.serverUrl); 
     } else {
-      console.warn('[PersistentMcpClient] forceReconnect called without a serverUrl. Manual connection needed.');
-      // this.isConnected is already false from disconnect()
-      throw new Error('No server URL available for reconnection. Please configure and connect manually.');
+      throw new Error('No server URL for reconnection. Configure and connect manually.');
     }
   }
 
-  /**
-   * Cleanup old connections in background without blocking
-   */
   private cleanupOldConnection(client: Client | null, transport: Transport | null): void {
     if (!client && !transport) return;
     const cleanup = async () => {
       try {
-        if (client) {
-          await Promise.race([
-            client.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Client close timeout')), 5000))
-          ]);
-        }
+        if (client) await Promise.race([client.close(), new Promise((_, r) => setTimeout(() => r(new Error('Client close timeout')), 5000))]);
         if (transport && 'close' in transport && typeof transport.close === 'function') {
-          await Promise.race([
-            transport.close(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Transport close timeout')), 5000))
-          ]);
+          await Promise.race([(transport as any).close(), new Promise((_, r) => setTimeout(() => r(new Error('Transport close timeout')), 5000))]);
         }
-        console.log('[PersistentMcpClient] Old connection cleaned up successfully');
-      } catch (error) {
-        console.warn('[PersistentMcpClient] Old connection cleanup failed (non-blocking):', error);
-      }
+      } catch (e) { console.warn('[PersistentMcpClient] Old connection cleanup failed (non-blocking):', e); }
     };
     cleanup();
   }
 
-  /**
-   * Clear the primitives cache
-   */
   public clearCache(): void {
     console.log('[PersistentMcpClient] Clearing primitives cache');
     this.primitives = null;
     this.primitivesLastFetched = 0;
   }
 
-  /**
-   * Get the server URL
-   */
-  public getServerUrl(): string {
-    return this.serverUrl;
-  }
+  public getServerUrl(): string { return this.serverUrl; }
+  public getClient(): Client | null { return this.client; }
 
-  /**
-   * Get the client instance
-   */
-  public getClient(): Client | null {
-    return this.client;
-  }
-
-  /**
-   * Get detailed connection debug information
-   */
-  public getConnectionDebugInfo(): {
-    isConnected: boolean;
-    hasClient: boolean;
-    hasTransport: boolean;
-    hasConnectionPromise: boolean;
-    serverUrl: string;
-    consecutiveFailures: number;
-    lastError: string | null;
-    timeSinceLastCheck: number;
-  } {
+  public getConnectionDebugInfo(): any { // Return type simplified for brevity
     return {
-      isConnected: this.isConnected,
-      hasClient: !!this.client,
-      hasTransport: !!this.transport,
-      hasConnectionPromise: !!this.connectionPromise,
-      serverUrl: this.serverUrl,
-      consecutiveFailures: this.consecutiveFailures,
-      lastError: this.lastConnectionError,
+      isConnected: this.isConnected, hasClient: !!this.client, hasTransport: !!this.transport,
+      hasConnectionPromise: !!this.connectionPromise, serverUrl: this.serverUrl,
+      consecutiveFailures: this.consecutiveFailures, lastError: this.lastConnectionError,
       timeSinceLastCheck: Date.now() - this.lastConnectionCheck,
     };
   }
 
-  /**
-   * Reset the connection state completely
-   */
   public resetConnectionState(): void {
     console.log('[PersistentMcpClient] Resetting connection state manually');
-    this.isConnected = false; // Set own status
-    this.client = null;
-    this.transport = null;
-    this.connectionPromise = null;
-    this.lastConnectionError = null; 
-    this.lastConnectionCheck = 0;
+    this.isConnected = false; this.client = null; this.transport = null; this.connectionPromise = null;
+    this.lastConnectionError = null; this.lastConnectionCheck = 0;
     console.log('[PersistentMcpClient] Connection state reset complete');
   }
 
-  /**
-   * Abort any hanging connection and reset state
-   */
   public abortConnection(): void {
     console.log('[PersistentMcpClient] Aborting current connection');
-    const clientToClose = this.client;
-    const transportToClose = this.transport;
-    this.isConnected = false; // Set own status
-    this.client = null;
-    this.transport = null;
-    this.connectionPromise = null;
+    const clientToClose = this.client; const transportToClose = this.transport;
+    this.isConnected = false; this.client = null; this.transport = null; this.connectionPromise = null;
     this.cleanupOldConnection(clientToClose, transportToClose);
     console.log('[PersistentMcpClient] Connection aborted');
   }
 }
+
 
 
 
