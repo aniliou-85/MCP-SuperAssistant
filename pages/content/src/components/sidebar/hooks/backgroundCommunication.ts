@@ -501,7 +501,7 @@ export const useBackgroundCommunication = (): BackgroundCommunication => {
         // If we have no tools cached, fetch them
         if (availableToolsRef.current.length === 0) {
           logMessage('[Background Communication] Connected with empty tool cache, refreshing tools');
-          refreshTools(true).catch(err => {
+          refreshTools(false).catch(err => {
             logMessage(
               `[Background Communication] Error refreshing tools after connection: ${err instanceof Error ? err.message : String(err)}`,
             );
@@ -801,7 +801,7 @@ export const useBackgroundCommunication = (): BackgroundCommunication => {
                 );
 
                 // Force a second refresh to ensure we have the latest tools from the new server
-                return refreshTools(true);
+                return refreshTools(false);
               })
               .then(tools => {
                 setAvailableTools(tools);

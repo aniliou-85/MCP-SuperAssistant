@@ -275,7 +275,7 @@ const ServerStatus: React.FC<ServerStatusProps> = ({ status: initialStatus }) =>
         setStatusMessage('Successfully reconnected to MCP server');
         logMessage('[ServerStatus] Reconnection successful, fetching fresh tool list');
         try {
-          const tools = await refreshTools(true);
+          const tools = await refreshTools(false);
           logMessage(`[ServerStatus] Successfully fetched ${tools.length} tools after reconnection`);
         } catch (refreshError) {
           logMessage(
@@ -419,7 +419,7 @@ const ServerStatus: React.FC<ServerStatusProps> = ({ status: initialStatus }) =>
 
         // Refresh tools silently without UI updates
         try {
-          const tools = await refreshTools(true);
+          const tools = await refreshTools(false);
           logMessage(`[ServerStatus] Successfully refreshed ${tools.length} tools after server change`);
         } catch (refreshError) {
           logMessage(
